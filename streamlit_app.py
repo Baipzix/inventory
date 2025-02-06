@@ -184,109 +184,70 @@ def purchase_page(inflow_df, filepath):
 
 
 
-
-
-
-def distribute_page():
+def distribute_page(inflow_df, outflow_df, filepath):
     """Distribution Form Page"""
     st.header("Distribute Items")
     
-    # Load current data
-    inflow_df, outflow_df, budget_df = load_data()
+    if "temp_distributions" not in st.session_state:
+        st.session_state.temp_distributions = []
     
-    if inflow_df is None:
-        return
-    
-    # Show available items
+    # Select available items
+    available_items = inflow_df[inflow_df['Quantity'] > 0][['Item_ID', 'Item_Type', 'Item_name', 'Quantity', 'Cost_per_Item']]
     st.subheader("Available Items")
-    available_items = inflow_df[['Item_ID', 'Item_Type', 'Item_name', 'Quantity', 'Cost_per_Item']]
-    available_items = available_items[available_items['Quantity'] > 0]  # Only show items with quantity > 0
     st.dataframe(available_items)
     
     with st.form("distribution_form"):
-        # Item Selection
         selected_item = st.selectbox(
             "Select Item to Distribute*",
             options=available_items['Item_ID'].tolist(),
             format_func=lambda x: f"{x} - {available_items[available_items['Item_ID'] == x]['Item_name'].iloc[0]}"
         )
         
-        # Get selected item details
         item_details = available_items[available_items['Item_ID'] == selected_item].iloc[0]
         
-        col1, col2 = st.columns(2)
-        with col1:
-            # Required fields
-            department = st.text_input(
-                "Department*",
-                help="Enter the receiving department"
-            )
-            
-            gift = st.selectbox(
-                "Gift*",
-                options=['Yes', 'No'],
-                help="Is this a gift?"
-            )
-            
-            quantity = st.number_input(
-                "Quantity*",
-                min_value=1,
-                max_value=int(item_details['Quantity']),
-                help=f"Available quantity: {item_details['Quantity']}"
-            )
-        
-        with col2:
-            event_type = st.selectbox(
-                "Event Type*",
-                options=budget_df['Event_Type'].unique().tolist(),
-                help="Select the type of event"
-            )
-            
-            event_name = st.text_input(
-                "Event Name*",
-                help="Enter the name of the event"
-            )
-            
-            distribution_date = st.date_input(
-                "Distribution Date*",
-                help="Select the date of distribution"
-            )
-        
-        # Optional Notes
-        notes = st.text_area(
-            "Notes (Optional)",
-            help="Add any additional information"
+        quantity = st.number_input(
+            "Quantity*",
+            min_value=1,
+            max_value=int(item_details['Quantity']),
+            help=f"Available quantity: {item_details['Quantity']}"
         )
         
+        event_type = st.text_input("Event Type*")
+        event_name = st.text_input("Event Name*")
+        department = st.text_input("Department*")
+        distribution_date = st.date_input("Distribution Date*")
         submitted = st.form_submit_button("Submit Distribution")
-        
-        if submitted:
-            # Validate required fields
-            if not all([department, event_type, event_name]):
-                st.error("Please fill in all required fields marked with *")
-                return
-            
-            # Prepare distribution data
+    
+    if submitted:
+        if not all([selected_item, event_type, event_name, department]):
+            st.error("Please fill in all required fields marked with *")
+        else:
             distribution_data = {
                 'Item_ID': selected_item,
-                'Event_Type': event_type,
                 'Event_Name': event_name,
+                'Event_Type': event_type,
                 'Department': department,
-                'Gift': gift,
                 'Quantity': quantity,
                 'Cost_per_Item': item_details['Cost_per_Item'],
-                'Item_Code': '',  # Leave blank or generate if needed
-                'Contact_Name_(Event)': '',  # Can be added to form if needed
-                'Item_Type': item_details['Item_Type'],
-                'Gift_Type': 'Regular' if gift == 'No' else 'Gift',
-                'Date_of_Distribution': distribution_date.strftime('%Y-%m-%d'),
-                'Completion_Status': 'Completed'
+                'Date_of_Distribution': distribution_date.strftime('%Y-%m-%d')
             }
             
-            # Display the data that will be added
-            st.success("Here's what will be added to the Outflow sheet:")
-            st.write(distribution_data)
+            st.session_state.temp_distributions.append(distribution_data)
+            new_distributions_df = pd.DataFrame(st.session_state.temp_distributions)
+            updated_outflow_df = pd.concat([outflow_df, new_distributions_df], ignore_index=True)
             
+            try:
+                with pd.ExcelWriter(filepath, mode='w', engine='openpyxl') as writer:
+                    updated_outflow_df.to_excel(writer, sheet_name='Outflow', index=False)
+                st.success("Data successfully saved!")
+                
+                # Display updated Outflow sheet
+                st.subheader("Updated Outflow Sheet")
+                st.dataframe(updated_outflow_df)
+            except Exception as e:
+                st.error(f"Error saving data: {e}")
+
+          
 
 def create_visualizations(inflow_df, outflow_df, budget_df):
     """Create visualizations using plotly"""
@@ -374,7 +335,7 @@ def main():
     if page == 'Purchase':
         purchase_page(inflow_df, filepath)
     elif page == 'Distribute':
-        distribute_page()
+        distribute_page(inflow_df, outflow_df, filepath)
     else:  # View Data page
         try:
             if inflow_df is not None:
